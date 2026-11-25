@@ -4,6 +4,7 @@ import com.lajara.murocampus.data.remote.PostApi
 import com.lajara.murocampus.model.Comentario
 import com.lajara.murocampus.model.NuevoPost
 import com.lajara.murocampus.model.Post
+import retrofit2.HttpException
 import kotlin.coroutines.cancellation.CancellationException
 
 interface PostRepository {
@@ -12,6 +13,7 @@ interface PostRepository {
     suspend fun comentarios(id: Int): Result<List<Comentario>>
     suspend fun porUsuario(userId: Int): Result<List<Post>>
     suspend fun crear(nuevo: NuevoPost): Result<Post>
+    suspend fun eliminar(id: Int): Result<Unit>
 }
 
 class PostRepositoryRemote(private val api: PostApi) : PostRepository {
@@ -39,4 +41,14 @@ class PostRepositoryRemote(private val api: PostApi) : PostRepository {
 
     override suspend fun crear(nuevo: NuevoPost): Result<Post> =
         llamar { api.crear(nuevo) }
+
+    override suspend fun eliminar(id: Int): Result<Unit> =
+        llamar {
+            val response = api.eliminar(id)
+            if (response.isSuccessful) {
+                Unit
+            } else {
+                throw HttpException(response)
+            }
+        }
 }

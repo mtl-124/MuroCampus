@@ -131,4 +131,66 @@ No continúes con otra mejora hasta que revise y pruebe esta.
 
 ## Prompt 3
 
+Quiero implementar la mejora "Borrar publicación" en mi aplicación Android MuroCampus.
 
+CONTEXTO DEL PROYECTO
+MuroCampus es una app Android hecha con Kotlin, Jetpack Compose y Material 3. Consume el servicio web REST de prueba JSONPlaceholder (https://jsonplaceholder.typicode.com/) con Retrofit 2.11.0, OkHttp 4.12.0 y kotlinx.serialization. Usa arquitectura MVVM + Repository. El paquete base es com.lajara.murocampus. Ya están terminadas las mejoras de encabezado con interceptor y de búsqueda por título.
+
+Estructura actual:
+- MainActivity.kt: maneja la navegación con idSeleccionado: Int? y mostrandoCrear: Boolean, con BackHandler. Al tocar una tarjeta llama a vm.abrir(postId) y pone idSeleccionado. Muestra PantallaDetalle(vm, id) cuando idSeleccionado no es null.
+- model/Modelos.kt: Post(userId, id, title, body), Comentario, NuevoPost y Usuario.
+- data/remote/PostApi.kt: interface con funciones suspend listar(): List<Post>, detalle(@Path("id") id: Int): Post, comentarios(@Path("id") id: Int): List<Comentario>, porUsuario(@Query("userId") userId: Int): List<Post> y crear(@Body nuevo: NuevoPost): Post. Las rutas no empiezan con "/".
+- data/remote/RetrofitClient.kt: object con cliente OkHttp, interceptor de encabezado, logging y Retrofit con conversor kotlinx.serialization.
+- data/PostRepository.kt: interface PostRepository (listar, detalle, comentarios, porUsuario, crear; todas suspend y devolviendo Result<...>) e implementación PostRepositoryRemote(private val api: PostApi). Esta clase tiene una función privada "private suspend fun <T> llamar(bloque: suspend () -> T): Result<T>" que hace try/catch: relanza CancellationException y convierte cualquier otra Exception en Result.failure(e).
+- viewmodel/PostViewModel.kt: contiene la clase PostsViewModel(private val repo: PostRepository). Expone lista, usuarioFiltro, la consulta de búsqueda y su lista filtrada, detalle: StateFlow<UiState<DetalleUi>>, crear: StateFlow<UiState<Post>?>, y las funciones cargar(), filtrar(), abrir(id), publicar(titulo, texto) y limpiarCrear(). También define data class DetalleUi(post: Post, comentarios: List<Comentario>).
+- viewmodel/UiState.kt: sealed interface UiState<out T> con Cargando, Exito(datos) y Error(mensaje), y mensajeDe(e: Throwable) que traduce IOException, HttpException, SerializationException y otros a mensajes en español.
+- ui/Componentes.kt: EtiquetaUsuario, TarjetaPost, Cargando() y ErrorConReintento(mensaje, onReintentar).
+- ui/PantallaDetalle.kt: función PantallaDetalle(vm: PostsViewModel, id: Int) con TopAppBar "MuroCampus", un when sobre vm.detalle (Cargando, Error con Reintentar, Exito) y, en Exito, una LazyColumn con la tarjeta del post, el título "Comentarios (N)" y las tarjetas de comentarios.
+- ui/PantallaLista.kt y ui/PantallaCrear.kt
+
+OBJETIVO DE LA MEJORA
+Agregar un botón "Eliminar" en la pantalla de detalle que borre la publicación usando @DELETE("posts/{id}") y que revise el código de respuesta HTTP mediante Response<Unit>.
+
+COMPORTAMIENTO ESPERADO
+- En PantallaDetalle, cuando el detalle se cargó con éxito, mostrar un botón "Eliminar" con el color de error del tema.
+- Al pulsarlo, mostrar un AlertDialog de confirmación ("¿Eliminar esta publicación?") con los botones "Eliminar" y "Cancelar". La llamada solo se hace si el usuario confirma.
+- Mientras se elimina, mostrar un indicador de progreso y deshabilitar el botón para evitar toques repetidos.
+- Si la eliminación es exitosa (código HTTP 2xx), volver a la lista y quitar esa publicación de la lista que está en memoria, mostrando un mensaje breve como "Publicación eliminada".
+- Si falla (sin internet, código 404, 500, etc.), mostrar el mensaje de error con la misma función mensajeDe y permitir reintentar, sin salir de la pantalla de detalle.
+- Importante: JSONPlaceholder simula el DELETE (responde 200 con cuerpo vacío pero no borra nada). Por eso, tras el éxito, la publicación debe quitarse de la lista local en el ViewModel; si se recargara desde el servidor volvería a aparecer, y eso es normal y debe explicarse en un comentario de la respuesta, no en el código.
+- El botón Atrás del sistema debe seguir funcionando igual.
+
+REQUISITOS TÉCNICOS POR CAPA
+1. API (data/remote/PostApi.kt): agregar "@DELETE("posts/{id}") suspend fun eliminar(@Path("id") id: Int): Response<Unit>". Usar retrofit2.Response para poder leer el código de estado. La ruta no empieza con "/".
+2. Repository (data/PostRepository.kt): agregar "suspend fun eliminar(id: Int): Result<Unit>" a la interface y a PostRepositoryRemote. La implementación debe llamar a api.eliminar(id) y revisar response.isSuccessful: si es exitoso devuelve Result.success(Unit); si no, devuelve Result.failure(HttpException(response)). Aquí SÍ se permite usar HttpException porque es la capa de datos. Debe seguir el mismo patrón de manejo de excepciones que ya usa la clase (relanzar CancellationException y convertir las demás en Result.failure), sin catch vacío.
+3. ViewModel (viewmodel/PostViewModel.kt): agregar un StateFlow<UiState<Unit>?> llamado "eliminacion" (null significa que aún no se intentó), una función eliminar(id: Int) que use viewModelScope.launch, ponga Cargando, llame a repo.eliminar(id) y convierta el Result con onSuccess y onFailure usando mensajeDe(it), y una función limpiarEliminacion(). En onSuccess debe quitar el post de la lista en memoria para que la lista lo refleje. El ViewModel NO debe importar Retrofit, PostApi, Response ni HttpException.
+4. View (ui/PantallaDetalle.kt y MainActivity.kt): el botón y el diálogo viven en PantallaDetalle y solo llaman a vm.eliminar(id). Al detectar el éxito, la navegación de vuelta a la lista se resuelve en MainActivity (poniendo idSeleccionado en null) y se limpia el estado con vm.limpiarEliminacion(). Ningún Composable debe llamar a la API.
+
+ARCHIVOS Y CAPAS QUE DEBEN CAMBIAR
+- data/remote/PostApi.kt, data/PostRepository.kt, viewmodel/PostViewModel.kt, ui/PantallaDetalle.kt y MainActivity.kt.
+- NO debe cambiar RetrofitClient.kt, UiState.kt, el modelo ni PantallaCrear.kt. Si crees que algún archivo extra debe cambiar, explícame por qué antes de tocarlo.
+
+ANTES DE MODIFICAR EL CÓDIGO
+1. Revisa la estructura actual del proyecto.
+2. Identifica los archivos y capas que deben cambiar.
+3. Explica brevemente qué cambios propones, capa por capa, y por qué HttpException solo aparece en el Repository.
+
+REGLAS OBLIGATORIAS
+- La pantalla solo debe comunicarse con el ViewModel.
+- El ViewModel solo debe comunicarse con la interface del Repository.
+- No coloques Retrofit, PostApi, Response ni HttpException dentro del ViewModel.
+- El Repository debe encargarse de las operaciones de datos y devolver Result.
+- No realices llamadas a la API desde un Composable.
+- No utilices GlobalScope; usa viewModelScope.
+- No uses direcciones http:// sin necesidad.
+- No dejes ningún bloque catch vacío que oculte excepciones, y no atrapes CancellationException sin relanzarla.
+- Conserva todo el código existente que no necesite cambios y no renombres funciones ni archivos existentes.
+
+FORMATO DE LA RESPUESTA
+Entrégame cada archivo modificado COMPLETO (PostApi.kt, PostRepository.kt, PostViewModel.kt, PantallaDetalle.kt y MainActivity.kt), con todos los imports necesarios, listos para pegar. Después explica en prose, sin comentarios dentro del código, el recorrido completo de un clic en "Eliminar": desde el Composable hasta Retrofit y de vuelta a la pantalla.
+
+CÓMO PROBARLA
+Explícame pruebas manuales: eliminar con éxito (comprobar en Logcat "DELETE .../posts/1" con respuesta 200), cancelar el diálogo, eliminar con modo avión (debe mostrar error y permitir reintentar), forzar un 404 cambiando temporalmente el id a 9999, y confirmar que la publicación desaparece de la lista local pero reaparece al recargar.
+
+Implementa únicamente esta mejora.
+No continúes con otra mejora hasta que revise y pruebe esta.

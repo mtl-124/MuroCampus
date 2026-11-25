@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lajara.murocampus.data.PostRepository
 import com.lajara.murocampus.model.Comentario
+import com.lajara.murocampus.model.NuevoPost
 import com.lajara.murocampus.model.Post
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -22,8 +23,14 @@ class PostsViewModel(private val repo: PostRepository) : ViewModel() {
     private val _lista = MutableStateFlow<UiState<List<Post>>>(UiState.Cargando)
     val lista: StateFlow<UiState<List<Post>>> = _lista.asStateFlow()
 
+    private val _usuarioFiltro = MutableStateFlow<Int?>(null)
+    val usuarioFiltro: StateFlow<Int?> = _usuarioFiltro.asStateFlow()
+
     private val _detalle = MutableStateFlow<UiState<DetalleUi>>(UiState.Cargando)
     val detalle: StateFlow<UiState<DetalleUi>> = _detalle.asStateFlow()
+
+    private val _crear = MutableStateFlow<UiState<Post>?>(null)
+    val crear: StateFlow<UiState<Post>?> = _crear.asStateFlow()
 
     init {
         cargar()
@@ -32,10 +39,17 @@ class PostsViewModel(private val repo: PostRepository) : ViewModel() {
     fun cargar() {
         viewModelScope.launch {
             _lista.value = UiState.Cargando
-            repo.listar()
+            val userId = _usuarioFiltro.value
+            val resultado = if (userId == null) repo.listar() else repo.porUsuario(userId)
+            resultado
                 .onSuccess { _lista.value = UiState.Exito(it) }
                 .onFailure { _lista.value = UiState.Error(mensajeDe(it)) }
         }
+    }
+
+    fun filtrar(userId: Int?) {
+        _usuarioFiltro.value = userId
+        cargar()
     }
 
     fun abrir(id: Int) {
@@ -60,5 +74,18 @@ class PostsViewModel(private val repo: PostRepository) : ViewModel() {
                 }
             }
         }
+    }
+
+    fun publicar(titulo: String, texto: String) {
+        viewModelScope.launch {
+            _crear.value = UiState.Cargando
+            repo.crear(NuevoPost(userId = 1, title = titulo, body = texto))
+                .onSuccess { _crear.value = UiState.Exito(it) }
+                .onFailure { _crear.value = UiState.Error(mensajeDe(it)) }
+        }
+    }
+
+    fun limpiarCrear() {
+        _crear.value = null
     }
 }

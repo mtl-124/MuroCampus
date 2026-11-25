@@ -9,8 +9,11 @@ import com.lajara.murocampus.model.Post
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class DetalleUi(
@@ -26,6 +29,31 @@ class PostsViewModel(private val repo: PostRepository) : ViewModel() {
     private val _usuarioFiltro = MutableStateFlow<Int?>(null)
     val usuarioFiltro: StateFlow<Int?> = _usuarioFiltro.asStateFlow()
 
+    private val _busqueda = MutableStateFlow("")
+    val busqueda: StateFlow<String> = _busqueda.asStateFlow()
+
+    val listaFiltrada: StateFlow<UiState<List<Post>>> = combine(_lista, _busqueda) { estado, query ->
+        when (estado) {
+            is UiState.Cargando -> UiState.Cargando
+            is UiState.Error -> estado
+            is UiState.Exito -> {
+                val q = query.trim()
+                if (q.isEmpty()) {
+                    estado
+                } else {
+                    val postsFiltrados = estado.datos.filter { post ->
+                        post.title.contains(q, ignoreCase = true)
+                    }
+                    UiState.Exito(postsFiltrados)
+                }
+            }
+        }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = UiState.Cargando
+    )
+
     private val _detalle = MutableStateFlow<UiState<DetalleUi>>(UiState.Cargando)
     val detalle: StateFlow<UiState<DetalleUi>> = _detalle.asStateFlow()
 
@@ -34,6 +62,10 @@ class PostsViewModel(private val repo: PostRepository) : ViewModel() {
 
     init {
         cargar()
+    }
+
+    fun buscar(query: String) {
+        _busqueda.value = query
     }
 
     fun cargar() {
